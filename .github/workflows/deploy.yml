@@ -34,7 +34,7 @@ jobs:
           cp -r server dist extra deploy/
           cp -r db deploy/ 2>/dev/null || true
           cp -r src/languages deploy/src/languages 2>/dev/null || true
-          cp package.json package-lock.json deploy/
+          cp package.json package-lock.json .npmrc deploy/
           
           # Create .htaccess for o2switch Node.js
           touch deploy/.htaccess
