@@ -35,6 +35,9 @@ jobs:
           cp -r db deploy/ 2>/dev/null || true
           cp -r src/languages deploy/src/languages 2>/dev/null || true
           cp package.json package-lock.json deploy/
+          
+          # Create .htaccess for o2switch Node.js
+          touch deploy/.htaccess
 
       - name: Deploy to o2switch via LFTP
         run: |
