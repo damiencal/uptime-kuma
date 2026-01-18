@@ -25,6 +25,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Install LFTP
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
       - name: Prepare deployment folder
         run: |
           mkdir -p deploy/db deploy/src
@@ -32,9 +35,6 @@ jobs:
           cp -r db deploy/ 2>/dev/null || true
           cp -r src/languages deploy/src/languages 2>/dev/null || true
           cp package.json package-lock.json deploy/
-
-      - name: Install LFTP
-        run: sudo apt-get update && sudo apt-get install -y lftp
 
       - name: Deploy to o2switch via LFTP
         run: |
@@ -46,4 +46,3 @@ jobs:
             mirror -R --verbose --parallel=10 --delete ./deploy/ uptime-kuma/;
             quit
           "
-
