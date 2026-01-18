@@ -33,7 +33,7 @@ jobs:
           mkdir -p deploy/db deploy/src
           cp -r server dist extra deploy/
           cp -r db deploy/ 2>/dev/null || true
-          cp -r src/languages deploy/src/languages 2>/dev/null || true
+          cp src/util.js src/util.ts deploy/src/
           cp package.json package-lock.json .npmrc deploy/
 
       - name: Deploy to o2switch via LFTP
