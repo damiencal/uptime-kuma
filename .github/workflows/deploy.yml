@@ -25,9 +25,6 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Install LFTP
-        run: sudo apt-get update && sudo apt-get install -y lftp
-
       - name: Prepare deployment folder
         run: |
           mkdir -p deploy/db deploy/src
@@ -36,13 +33,13 @@ jobs:
           cp -r src/languages deploy/src/languages 2>/dev/null || true
           cp package.json package-lock.json deploy/
 
-      - name: Deploy to o2switch via LFTP
-        run: |
-          lftp -u "${{ secrets.FTP_USER }},${{ secrets.FTP_PASSWORD }}" "${{ secrets.FTP_HOST }}" -e "
-            set ftp:ssl-allow yes;
-            set ssl:verify-certificate no;
-            set mirror:parallel-transfer-count 10;
-            set mirror:use-pget-n 5;
-            mirror -R --verbose --parallel=10 --delete ./deploy/ /uptime-kuma/;
-            quit
-          "
+      - name: Deploy to o2switch via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./deploy/
+          server-dir: /uptime-kuma/
+          dangerous-clean-slate: false
+
