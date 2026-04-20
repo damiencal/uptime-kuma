@@ -11,10 +11,12 @@ import CallMeBot from "./CallMeBot.vue";
 import SMSC from "./SMSC.vue";
 import DingDing from "./DingDing.vue";
 import Discord from "./Discord.vue";
+import Fluxer from "./Fluxer.vue";
 import Elks from "./46elks.vue";
 import Feishu from "./Feishu.vue";
 import FreeMobile from "./FreeMobile.vue";
 import GoogleChat from "./GoogleChat.vue";
+import GoogleSheets from "./GoogleSheets.vue";
 import Gorush from "./Gorush.vue";
 import Gotify from "./Gotify.vue";
 import GrafanaOncall from "./GrafanaOncall.vue";
@@ -35,6 +37,7 @@ import OneChat from "./OneChat.vue";
 import OneBot from "./OneBot.vue";
 import Onesender from "./Onesender.vue";
 import Opsgenie from "./Opsgenie.vue";
+import JiraServiceManagement from "./JiraServiceManagement.vue";
 import PagerDuty from "./PagerDuty.vue";
 import FlashDuty from "./FlashDuty.vue";
 import PagerTree from "./PagerTree.vue";
@@ -59,6 +62,8 @@ import STMP from "./SMTP.vue";
 import Teams from "./Teams.vue";
 import TechulusPush from "./TechulusPush.vue";
 import Telegram from "./Telegram.vue";
+import Teltonika from "./Teltonika.vue";
+import Telnyx from "./Telnyx.vue";
 import Threema from "./Threema.vue";
 import Twilio from "./Twilio.vue";
 import Webhook from "./Webhook.vue";
@@ -70,6 +75,7 @@ import SpugPush from "./SpugPush.vue";
 import SevenIO from "./SevenIO.vue";
 import Whapi from "./Whapi.vue";
 import WAHA from "./WAHA.vue";
+import Whatsapp360messenger from "./360messenger.vue";
 import Evolution from "./Evolution.vue";
 import Cellsynt from "./Cellsynt.vue";
 import WPush from "./WPush.vue";
@@ -82,6 +88,8 @@ import SMSIR from "./SMSIR.vue";
 import Webpush from "./Webpush.vue";
 import HaloPSA from "./HaloPSA.vue";
 import Resend from "./Resend.vue";
+import Max from "./Max.vue";
+import VK from "./VK.vue";
 
 /**
  * Manage all notification form.
@@ -101,10 +109,12 @@ const NotificationFormList = {
     smsir: SMSIR,
     DingDing: DingDing,
     discord: Discord,
+    fluxer: Fluxer,
     Elks: Elks,
     Feishu: Feishu,
     FreeMobile: FreeMobile,
     GoogleChat: GoogleChat,
+    GoogleSheets: GoogleSheets,
     gorush: Gorush,
     gotify: Gotify,
     GrafanaOncall: GrafanaOncall,
@@ -124,6 +134,7 @@ const NotificationFormList = {
     OneBot: OneBot,
     Onesender: Onesender,
     Opsgenie: Opsgenie,
+    JiraServiceManagement: JiraServiceManagement,
     PagerDuty: PagerDuty,
     FlashDuty: FlashDuty,
     PagerTree: PagerTree,
@@ -148,6 +159,8 @@ const NotificationFormList = {
     stackfield: Stackfield,
     teams: Teams,
     telegram: Telegram,
+    Teltonika: Teltonika,
+    telnyx: Telnyx,
     threema: Threema,
     twilio: Twilio,
     Splunk: Splunk,
@@ -162,6 +175,7 @@ const NotificationFormList = {
     evolution: Evolution,
     notifery: Notifery,
     waha: WAHA,
+    Whatsapp360messenger: Whatsapp360messenger,
     gtxmessaging: GtxMessaging,
     Cellsynt: Cellsynt,
     WPush: WPush,
@@ -172,6 +186,8 @@ const NotificationFormList = {
     SMSPlanet: SMSPlanet,
     Webpush: Webpush,
     HaloPSA: HaloPSA,
+    max: Max,
+    VK: VK,
 };
 
 export default NotificationFormList;

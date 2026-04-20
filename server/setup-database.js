@@ -4,8 +4,10 @@ const expressStaticGzip = require("express-static-gzip");
 const fs = require("fs");
 const path = require("path");
 const Database = require("./database");
-const { allowDevAllOrigin } = require("./util-server");
+const { allowDevAllOrigin, printServerUrls } = require("./util-server");
 const mysql = require("mysql2/promise");
+const { isSSL, sslKey, sslCert, sslKeyPassphrase } = require("./config");
+const https = require("https");
 
 /**
  * Reads a configuration value from an environment variable or a Docker secrets file.
@@ -102,6 +104,7 @@ class SetupDatabase {
             dbConfig.dbName = process.env.UPTIME_KUMA_DB_NAME;
             dbConfig.username = getEnvOrFile("UPTIME_KUMA_DB_USERNAME");
             dbConfig.password = getEnvOrFile("UPTIME_KUMA_DB_PASSWORD");
+            dbConfig.socketPath = process.env.UPTIME_KUMA_DB_SOCKET?.trim();
             dbConfig.ssl = getEnvOrFile("UPTIME_KUMA_DB_SSL")?.toLowerCase() === "true";
             dbConfig.ca = getEnvOrFile("UPTIME_KUMA_DB_CA");
             Database.writeDBConfig(dbConfig);
@@ -160,6 +163,7 @@ class SetupDatabase {
                     runningSetup: this.runningSetup,
                     needSetup: this.needSetup,
                     isEnabledEmbeddedMariaDB: this.isEnabledEmbeddedMariaDB(),
+                    isEnabledMariaDBSocket: process.env.UPTIME_KUMA_DB_SOCKET?.trim().length > 0,
                 });
             });
 
@@ -202,16 +206,22 @@ class SetupDatabase {
 
                 // External MariaDB
                 if (dbConfig.type === "mariadb") {
-                    if (!dbConfig.hostname) {
-                        response.status(400).json("Hostname is required");
-                        this.runningSetup = false;
-                        return;
-                    }
+                    // If socketPath is provided and not empty, validate it
+                    if (process.env.UPTIME_KUMA_DB_SOCKET?.trim().length > 0) {
+                        dbConfig.socketPath = process.env.UPTIME_KUMA_DB_SOCKET.trim();
+                    } else {
+                        // socketPath not provided, hostname and port are required
+                        if (!dbConfig.hostname) {
+                            response.status(400).json("Hostname is required");
+                            this.runningSetup = false;
+                            return;
+                        }
 
-                    if (!dbConfig.port) {
-                        response.status(400).json("Port is required");
-                        this.runningSetup = false;
-                        return;
+                        if (!dbConfig.port) {
+                            response.status(400).json("Port is required");
+                            this.runningSetup = false;
+                            return;
+                        }
                     }
 
                     if (!dbConfig.dbName) {
@@ -241,6 +251,7 @@ class SetupDatabase {
                             user: dbConfig.username,
                             password: dbConfig.password,
                             database: dbConfig.dbName,
+                            socketPath: dbConfig.socketPath,
                             ...(dbConfig.ssl
                                 ? {
                                       ssl: {
@@ -297,10 +308,24 @@ class SetupDatabase {
                 response.end();
             });
 
-            tempServer = app.listen(port, hostname, () => {
-                log.info("setup-database", `Starting Setup Database on ${port}`);
-                let domain = hostname ? hostname : "localhost";
-                log.info("setup-database", `Open http://${domain}:${port} in your browser`);
+            let server;
+
+            if (isSSL) {
+                server = tempServer = https.createServer(
+                    {
+                        key: fs.readFileSync(sslKey),
+                        cert: fs.readFileSync(sslCert),
+                        passphrase: sslKeyPassphrase,
+                    },
+                    app
+                );
+            } else {
+                server = app;
+            }
+
+            tempServer = server.listen(port, hostname, () => {
+                log.info("setup-database", "Starting Setup Database");
+                printServerUrls("setup-database", port, hostname, isSSL);
                 log.info("setup-database", "Waiting for user action...");
             });
         });

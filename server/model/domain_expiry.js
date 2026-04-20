@@ -4,33 +4,22 @@ const { log, TYPES_WITH_DOMAIN_EXPIRY_SUPPORT_VIA_FIELD } = require("../../src/u
 const { parse: parseTld } = require("tldts");
 const { setting, setSetting } = require("../util-server");
 const { Notification } = require("../notification");
-const { default: NodeFetchCache, MemoryCache } = require("node-fetch-cache");
 const TranslatableError = require("../translatable-error");
 const dayjs = require("dayjs");
+const { Settings } = require("../settings");
 
-const cachedFetch = process.env.NODE_ENV
-    ? NodeFetchCache.create({
-          // cache for 8h
-          cache: new MemoryCache({ ttl: 1000 * 60 * 60 * 8 }),
-      })
-    : fetch;
+let cacheRdapDnsData = null;
+let nextChecking = 0;
+let running = false;
 
 /**
  * Find the RDAP server for a given TLD
  * @param {string} tld TLD
- * @returns {Promise<string>} First RDAP server found
+ * @returns {string|null} First RDAP server found
  */
 async function getRdapServer(tld) {
-    let rdapList;
-    try {
-        const res = await cachedFetch("https://data.iana.org/rdap/dns.json");
-        rdapList = await res.json();
-    } catch (error) {
-        log.debug("rdap", error);
-        return null;
-    }
-
-    const services = rdapList["services"] ?? [];
+    const rdapDnsData = await getRdapDnsData();
+    const services = rdapDnsData["services"] ?? [];
     const rootTld = tld?.split(".").pop();
     if (rootTld) {
         for (const [tlds, urls] of services) {
@@ -41,6 +30,76 @@ async function getRdapServer(tld) {
     }
     log.debug("rdap", `No RDAP server found for TLD ${tld}`);
     return null;
+}
+
+/**
+ * Get RDAP DNS data from IANA and save to Setting
+ * @returns {Promise<{}>} RDAP DNS data
+ */
+async function getRdapDnsData() {
+    // Cache for one week
+    if (cacheRdapDnsData && Date.now() < nextChecking) {
+        return cacheRdapDnsData;
+    }
+
+    // Avoid multiple simultaneous updates
+    // Use older data first if another update is in progress
+    if (running) {
+        return await getOfflineRdapDnsData();
+    }
+
+    try {
+        running = true;
+        log.info("rdap", "Updating RDAP DNS data from IANA...");
+        const response = await fetch("https://data.iana.org/rdap/dns.json");
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Simple validation
+        if (!data.services || !Array.isArray(data.services)) {
+            throw new Error("Invalid RDAP DNS data structure");
+        }
+
+        cacheRdapDnsData = data;
+
+        // Next week
+        nextChecking = Date.now() + 7 * 24 * 60 * 60 * 1000;
+        await Settings.set("rdapDnsData", data);
+        log.info("rdap", "RDAP DNS data updated successfully. Number of services: " + data.services.length);
+    } catch (error) {
+        log.info("rdap", `Uable to update RDAP DNS data from source: ${error.message}`);
+        cacheRdapDnsData = await getOfflineRdapDnsData();
+
+        // Check again next day
+        nextChecking = Date.now() + 24 * 60 * 60 * 1000;
+    }
+
+    running = false;
+    return cacheRdapDnsData;
+}
+
+/**
+ * Get RDAP DNS data from Setting or hardcoded file as fallback
+ * Fail safe
+ * @returns {Promise<{}>} RDAP DNS data
+ */
+async function getOfflineRdapDnsData() {
+    let data = null;
+    try {
+        data = await Settings.get("rdapDnsData");
+
+        // Simple validation
+        if (!data.services || !Array.isArray(data.services)) {
+            throw new Error("Invalid RDAP DNS data structure");
+        }
+    } catch (e) {
+        // If not downloaded previously, use the hardcoded data
+        data = require("../../extra/rdap-dns.json");
+    }
+    return data;
 }
 
 /**
@@ -161,17 +220,11 @@ class DomainExpiry extends BeanModel {
 
         const tld = parseTld(target);
 
-        // Avoid logging for incomplete/invalid input while editing monitors.
-        if (tld.isIp) {
-            throw new TranslatableError("domain_expiry_unsupported_is_ip", { hostname: tld.hostname });
-        }
-        // No one-letter public suffix exists; treat this as an incomplete/invalid input while typing.
-        if (tld.publicSuffix.length < 2) {
-            throw new TranslatableError("domain_expiry_public_suffix_too_short", { publicSuffix: tld.publicSuffix });
-        }
+        // It must be checked first, filter out non-ICANN domains.
         if (!tld.isIcann) {
             throw new TranslatableError("domain_expiry_unsupported_is_icann", {
-                domain: tld.domain,
+                // If domain is null, use hostname as fallback for better error message.
+                domain: tld.domain ?? tld.hostname ?? "EMPTY DOMAIN",
                 publicSuffix: tld.publicSuffix,
             });
         }
@@ -226,7 +279,7 @@ class DomainExpiry extends BeanModel {
         let bean = await DomainExpiry.findByDomainNameOrCreate(domainName);
         let expiryDate;
 
-        if (bean?.lastCheck && dayjs.utc(bean.lastCheck).diff(dayjs.utc(), "day") < 1) {
+        if (bean?.lastCheck && dayjs.utc().diff(dayjs.utc(bean.lastCheck), "day") < 1) {
             log.debug("domain_expiry", `Domain expiry already checked recently for ${bean.domain}, won't re-check.`);
             return bean.expiry;
         } else if (bean) {

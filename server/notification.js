@@ -12,11 +12,13 @@ const CallMeBot = require("./notification-providers/call-me-bot");
 const SMSC = require("./notification-providers/smsc");
 const DingDing = require("./notification-providers/dingding");
 const Discord = require("./notification-providers/discord");
+const Fluxer = require("./notification-providers/fluxer");
 const Elks = require("./notification-providers/46elks");
 const Feishu = require("./notification-providers/feishu");
 const Notifery = require("./notification-providers/notifery");
 const FreeMobile = require("./notification-providers/freemobile");
 const GoogleChat = require("./notification-providers/google-chat");
+const GoogleSheets = require("./notification-providers/google-sheets");
 const Gorush = require("./notification-providers/gorush");
 const Gotify = require("./notification-providers/gotify");
 const GrafanaOncall = require("./notification-providers/grafana-oncall");
@@ -35,6 +37,7 @@ const Octopush = require("./notification-providers/octopush");
 const OneChat = require("./notification-providers/onechat");
 const OneBot = require("./notification-providers/onebot");
 const Opsgenie = require("./notification-providers/opsgenie");
+const JiraServiceManagement = require("./notification-providers/jira-service-management");
 const PagerDuty = require("./notification-providers/pagerduty");
 const Pumble = require("./notification-providers/pumble");
 const FlashDuty = require("./notification-providers/flashduty");
@@ -58,6 +61,8 @@ const Stackfield = require("./notification-providers/stackfield");
 const Teams = require("./notification-providers/teams");
 const TechulusPush = require("./notification-providers/techulus-push");
 const Telegram = require("./notification-providers/telegram");
+const Teltonika = require("./notification-providers/teltonika");
+const Telnyx = require("./notification-providers/telnyx");
 const Threema = require("./notification-providers/threema");
 const Twilio = require("./notification-providers/twilio");
 const Splunk = require("./notification-providers/splunk");
@@ -83,8 +88,11 @@ const SMSPlanet = require("./notification-providers/sms-planet");
 const SpugPush = require("./notification-providers/spugpush");
 const SMSIR = require("./notification-providers/smsir");
 const { commandExists } = require("./util-server");
+const Whatsapp360messenger = require("./notification-providers/360messenger");
 const Webpush = require("./notification-providers/Webpush");
 const HaloPSA = require("./notification-providers/HaloPSA");
+const Max = require("./notification-providers/max");
+const VK = require("./notification-providers/vk");
 
 class Notification {
     providerList = {};
@@ -113,10 +121,12 @@ class Notification {
             new SMSC(),
             new DingDing(),
             new Discord(),
+            new Fluxer(),
             new Elks(),
             new Feishu(),
             new FreeMobile(),
             new GoogleChat(),
+            new GoogleSheets(),
             new Gorush(),
             new Gotify(),
             new GrafanaOncall(),
@@ -136,6 +146,7 @@ class Notification {
             new OneBot(),
             new Onesender(),
             new Opsgenie(),
+            new JiraServiceManagement(),
             new PagerDuty(),
             new FlashDuty(),
             new PagerTree(),
@@ -161,6 +172,8 @@ class Notification {
             new Teams(),
             new TechulusPush(),
             new Telegram(),
+            new Teltonika(),
+            new Telnyx(),
             new Threema(),
             new Twilio(),
             new Splunk(),
@@ -183,8 +196,11 @@ class Notification {
             new Notifery(),
             new SMSIR(),
             new SendGrid(),
+            new Whatsapp360messenger(),
             new Webpush(),
             new HaloPSA(),
+            new Max(),
+            new VK(),
         ];
         for (let item of list) {
             if (!item.name) {
@@ -235,13 +251,17 @@ class Notification {
             bean = R.dispense("notification");
         }
 
+        // applyExisting is one time only, don't save it to database.
+        const applyExisting = notification.applyExisting || false;
+        notification.applyExisting = false;
+
         bean.name = notification.name;
         bean.user_id = userID;
         bean.config = JSON.stringify(notification);
         bean.is_default = notification.isDefault || false;
         await R.store(bean);
 
-        if (notification.applyExisting) {
+        if (applyExisting) {
             await applyNotificationEveryMonitor(bean.id, userID);
         }
 

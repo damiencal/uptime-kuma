@@ -33,7 +33,6 @@ const {
     checkStatusCode,
     getTotalClientInRoom,
     setting,
-    setSetting,
     httpNtlm,
     radius,
     kafkaProducerAsync,
@@ -41,6 +40,8 @@ const {
     rootCertificatesFingerprints,
     axiosAbortSignal,
     checkCertificateHostname,
+    encodeBase64,
+    checkCertExpiryNotifications,
 } = require("../util-server");
 const { R } = require("redbean-node");
 const { BeanModel } = require("redbean-node/dist/bean-model");
@@ -97,11 +98,7 @@ class Monitor extends BeanModel {
             obj.tags = await this.getTags();
         }
 
-        if (
-            certExpiry &&
-            (this.type === "http" || this.type === "keyword" || this.type === "json-query") &&
-            this.getURLProtocol() === "https:"
-        ) {
+        if (certExpiry) {
             const { certExpiryDaysRemaining, validCert } = await this.getCertExpiry(this.id);
             obj.certExpiryDaysRemaining = certExpiryDaysRemaining;
             obj.validCert = validCert;
@@ -141,11 +138,14 @@ class Monitor extends BeanModel {
             method: this.method,
             hostname: this.hostname,
             port: this.port,
+            location: this.location,
+            protocol: this.protocol,
             maxretries: this.maxretries,
             weight: this.weight,
             active: preloadData.activeStatus.get(this.id),
             forceInactive: preloadData.forceInactive.get(this.id),
             type: this.type,
+            subtype: this.subtype,
             timeout: this.timeout,
             interval: this.interval,
             retryInterval: this.retryInterval,
@@ -290,17 +290,6 @@ class Monitor extends BeanModel {
     }
 
     /**
-     * Encode user and password to Base64 encoding
-     * for HTTP "basic" auth, as per RFC-7617
-     * @param {string|null} user - The username (nullable if not changed by a user)
-     * @param {string|null} pass - The password (nullable if not changed by a user)
-     * @returns {string} Encoded Base64 string
-     */
-    encodeBase64(user, pass) {
-        return Buffer.from(`${user || ""}:${pass || ""}`).toString("base64");
-    }
-
-    /**
      * Is the TLS expiry notification enabled?
      * @returns {boolean} Enabled?
      */
@@ -421,6 +410,8 @@ class Monitor extends BeanModel {
         let previousBeat = null;
         let retries = 0;
 
+        this.rootCertificates = rootCertificates;
+
         try {
             this.prometheus = new Prometheus(this, await this.getTags());
         } catch (e) {
@@ -482,7 +473,7 @@ class Monitor extends BeanModel {
                     let basicAuthHeader = {};
                     if (this.auth_method === "basic") {
                         basicAuthHeader = {
-                            Authorization: "Basic " + this.encodeBase64(this.basic_auth_user, this.basic_auth_pass),
+                            Authorization: "Basic " + encodeBase64(this.basic_auth_user, this.basic_auth_pass),
                         };
                     }
 
@@ -922,7 +913,7 @@ class Monitor extends BeanModel {
                         );
                     }
 
-                    if (!bean.ping) {
+                    if (bean.ping === undefined || bean.ping === null) {
                         bean.ping = dayjs().valueOf() - startTime;
                     }
                 } else if (this.type === "kafka-producer") {
@@ -1505,24 +1496,48 @@ class Monitor extends BeanModel {
 
             let msg = `[${monitor.name}] [${text}] ${bean.msg}`;
 
+            const heartbeatJSON = await bean.toJSONAsync({ decodeResponse: true });
+            const monitorData = [{ id: monitor.id, active: monitor.active, name: monitor.name }];
+            const preloadData = await Monitor.preparePreloadData(monitorData);
+            // Prevent if the msg is undefined, notifications such as Discord cannot send out.
+            if (!heartbeatJSON["msg"]) {
+                heartbeatJSON["msg"] = "N/A";
+            }
+
+            // Also provide the time in server timezone
+            heartbeatJSON["timezone"] = await UptimeKumaServer.getInstance().getTimezone();
+            heartbeatJSON["timezoneOffset"] = UptimeKumaServer.getInstance().getTimezoneOffset();
+            heartbeatJSON["localDateTime"] = dayjs
+                .utc(heartbeatJSON["time"])
+                .tz(heartbeatJSON["timezone"])
+                .format(SQL_DATETIME_FORMAT);
+
+            // Calculate downtime tracking information when service comes back up
+            // This makes downtime information available to all notification providers
+            if (bean.status === UP && monitor.id) {
+                try {
+                    // Filter by important = 1 to get the state transition heartbeat (e.g. UP→DOWN),
+                    // not the most recent DOWN heartbeat which would be the last check before recovery.
+                    const lastDownHeartbeat = await R.getRow(
+                        "SELECT time FROM heartbeat WHERE monitor_id = ? AND status = ? AND important = 1 ORDER BY time DESC LIMIT 1",
+                        [monitor.id, DOWN]
+                    );
+
+                    if (lastDownHeartbeat && lastDownHeartbeat.time) {
+                        heartbeatJSON["lastDownTime"] = lastDownHeartbeat.time;
+                    }
+                } catch (error) {
+                    // If we can't calculate downtime, just continue without it
+                    // Silently fail to avoid disrupting notification sending
+                    log.debug(
+                        "monitor",
+                        `[${monitor.name}] Could not calculate downtime information: ${error.message}`
+                    );
+                }
+            }
+
             for (let notification of notificationList) {
                 try {
-                    const heartbeatJSON = await bean.toJSONAsync({ decodeResponse: true });
-                    const monitorData = [{ id: monitor.id, active: monitor.active, name: monitor.name }];
-                    const preloadData = await Monitor.preparePreloadData(monitorData);
-                    // Prevent if the msg is undefined, notifications such as Discord cannot send out.
-                    if (!heartbeatJSON["msg"]) {
-                        heartbeatJSON["msg"] = "N/A";
-                    }
-
-                    // Also provide the time in server timezone
-                    heartbeatJSON["timezone"] = await UptimeKumaServer.getInstance().getTimezone();
-                    heartbeatJSON["timezoneOffset"] = UptimeKumaServer.getInstance().getTimezoneOffset();
-                    heartbeatJSON["localDateTime"] = dayjs
-                        .utc(heartbeatJSON["time"])
-                        .tz(heartbeatJSON["timezone"])
-                        .format(SQL_DATETIME_FORMAT);
-
                     await Notification.send(
                         JSON.parse(notification.config),
                         msg,
@@ -1548,64 +1563,6 @@ class Monitor extends BeanModel {
             [monitor.id]
         );
         return notificationList;
-    }
-
-    /**
-     * checks certificate chain for expiring certificates
-     * @param {object} tlsInfoObject Information about certificate
-     * @returns {Promise<void>}
-     */
-    async checkCertExpiryNotifications(tlsInfoObject) {
-        if (tlsInfoObject && tlsInfoObject.certInfo && tlsInfoObject.certInfo.daysRemaining) {
-            const notificationList = await Monitor.getNotificationList(this);
-
-            if (!notificationList.length > 0) {
-                // fail fast. If no notification is set, all the following checks can be skipped.
-                log.debug("monitor", "No notification, no need to send cert notification");
-                return;
-            }
-
-            let notifyDays = await setting("tlsExpiryNotifyDays");
-            if (notifyDays == null || !Array.isArray(notifyDays)) {
-                // Reset Default
-                await setSetting("tlsExpiryNotifyDays", [7, 14, 21], "general");
-                notifyDays = [7, 14, 21];
-            }
-
-            if (Array.isArray(notifyDays)) {
-                for (const targetDays of notifyDays) {
-                    let certInfo = tlsInfoObject.certInfo;
-                    while (certInfo) {
-                        let subjectCN = certInfo.subject["CN"];
-                        if (rootCertificates.has(certInfo.fingerprint256)) {
-                            log.debug(
-                                "monitor",
-                                `Known root cert: ${certInfo.certType} certificate "${subjectCN}" (${certInfo.daysRemaining} days valid) on ${targetDays} deadline.`
-                            );
-                            break;
-                        } else if (certInfo.daysRemaining > targetDays) {
-                            log.debug(
-                                "monitor",
-                                `No need to send cert notification for ${certInfo.certType} certificate "${subjectCN}" (${certInfo.daysRemaining} days valid) on ${targetDays} deadline.`
-                            );
-                        } else {
-                            log.debug(
-                                "monitor",
-                                `call sendCertNotificationByTargetDays for ${targetDays} deadline on certificate ${subjectCN}.`
-                            );
-                            await this.sendCertNotificationByTargetDays(
-                                subjectCN,
-                                certInfo.certType,
-                                certInfo.daysRemaining,
-                                targetDays,
-                                notificationList
-                            );
-                        }
-                        certInfo = certInfo.issuerCertificate;
-                    }
-                }
-            }
-        }
     }
 
     /**
@@ -1724,6 +1681,55 @@ class Monitor extends BeanModel {
             }
         }
 
+        // Validate JSON fields to prevent invalid JSON from being stored in database
+        if (this.kafkaProducerBrokers) {
+            try {
+                JSON.parse(this.kafkaProducerBrokers);
+            } catch (e) {
+                throw new Error(`Kafka Producer Brokers must be valid JSON: ${e.message}`);
+            }
+        }
+
+        if (this.kafkaProducerSaslOptions) {
+            try {
+                JSON.parse(this.kafkaProducerSaslOptions);
+            } catch (e) {
+                throw new Error(`Kafka Producer SASL Options must be valid JSON: ${e.message}`);
+            }
+        }
+
+        if (this.rabbitmqNodes) {
+            try {
+                JSON.parse(this.rabbitmqNodes);
+            } catch (e) {
+                throw new Error(`RabbitMQ Nodes must be valid JSON: ${e.message}`);
+            }
+        }
+
+        if (this.conditions) {
+            try {
+                JSON.parse(this.conditions);
+            } catch (e) {
+                throw new Error(`Conditions must be valid JSON: ${e.message}`);
+            }
+        }
+
+        if (this.headers) {
+            try {
+                JSON.parse(this.headers);
+            } catch (e) {
+                throw new Error(`Headers must be valid JSON: ${e.message}`);
+            }
+        }
+
+        if (this.accepted_statuscodes_json) {
+            try {
+                JSON.parse(this.accepted_statuscodes_json);
+            } catch (e) {
+                throw new Error(`Accepted status codes must be valid JSON: ${e.message}`);
+            }
+        }
+
         if (this.type === "ping") {
             // ping parameters validation
             if (this.packetSize && (this.packetSize < PING_PACKET_SIZE_MIN || this.packetSize > PING_PACKET_SIZE_MAX)) {
@@ -1784,6 +1790,15 @@ class Monitor extends BeanModel {
                 if (delay >= maxDelayFromInterval) {
                     throw new Error(`Screenshot delay must be less than ${maxDelayFromInterval}ms (0.5 × interval)`);
                 }
+            }
+        }
+
+        if (this.type === "mongodb" && this.databaseQuery) {
+            // Validate that databaseQuery is valid JSON
+            try {
+                JSON.parse(this.databaseQuery);
+            } catch (error) {
+                throw new Error(`Invalid JSON in database query: ${error.message}`);
             }
         }
     }
@@ -2044,7 +2059,7 @@ class Monitor extends BeanModel {
         }
 
         const parentActive = await Monitor.isParentActive(parent.id);
-        return parent.active && parentActive;
+        return parent.active === 1 && parentActive;
     }
 
     /**
@@ -2084,7 +2099,7 @@ class Monitor extends BeanModel {
 
         if (!this.getIgnoreTls() && this.isEnabledExpiryNotification()) {
             log.debug("monitor", `[${this.name}] call checkCertExpiryNotifications`);
-            await this.checkCertExpiryNotifications(tlsInfo);
+            await checkCertExpiryNotifications(this, tlsInfo);
         }
     }
 }

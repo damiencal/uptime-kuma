@@ -215,6 +215,8 @@ export default {
                 bale: "Bale",
                 Bitrix24: "Bitrix24",
                 discord: "Discord",
+                max: this.$t("maxMessenger"),
+                fluxer: "Fluxer",
                 GoogleChat: "Google Chat (Google Workspace)",
                 gorush: "Gorush",
                 gotify: "Gotify",
@@ -244,6 +246,7 @@ export default {
                 whapi: "WhatsApp (Whapi)",
                 evolution: "WhatsApp (Evolution)",
                 waha: "WhatsApp (WAHA)",
+                Whatsapp360messenger: "WhatsApp (360messenger)",
             };
 
             // Push Services - Push notification services
@@ -272,6 +275,8 @@ export default {
                 SevenIO: "SevenIO",
                 SMSEagle: "SMSEagle",
                 SMSPartner: "SMS Partner",
+                telnyx: "Telnyx",
+                Teltonika: this.$t("Teltonika SMS Gateway"),
                 twilio: "Twilio",
             };
 
@@ -292,6 +297,7 @@ export default {
                 HeiiOnCall: "Heii On-Call",
                 Keep: "Keep",
                 Opsgenie: "Opsgenie",
+                JiraServiceManagement: this.$t("Jira Service Management"),
                 PagerDuty: "PagerDuty",
                 PagerTree: "PagerTree",
                 SIGNL4: "SIGNL4",
@@ -305,7 +311,9 @@ export default {
             };
 
             // Other Integrations
-            let other = {};
+            let other = {
+                GoogleSheets: "Google Sheets",
+            };
 
             // Regional - Not supported in most regions or documentation is not in English
             let regional = {
@@ -327,6 +335,7 @@ export default {
                 WPush: "WPush(wpush.cn)",
                 YZJ: "YZJ (云之家自定义机器人)",
                 SMSPlanet: "SMSPlanet.pl",
+                VK: "VK",
             };
 
             // Sort by notification name alphabetically
@@ -410,6 +419,10 @@ export default {
                 for (let n of this.$root.notificationList) {
                     if (n.id === notificationID) {
                         this.notification = JSON.parse(n.config);
+
+                        // applyExisting is one time only, but it got saved to database previously. Workaround fix, set it to false here to deal with the problem.
+                        this.notification.applyExisting = false;
+
                         break;
                     }
                 }
